@@ -1,11 +1,8 @@
 
 // Demonstrates use of the Wire library
 // Writes data to an I2C/TWI slave device
-// Refer to the "Wire Slave Receiver" example for use with this
 
 // Created 29 March 2006
-
-// This example code is in the public domain.
 
 /* There are both 7- and 8-bit versions of I2C addresses. 
 7 bits identify the device, and the eighth bit determines if it's being written to or read from. 
@@ -17,7 +14,7 @@ Please note that a pull-up resistor is needed when connecting SDA/SCL pins. Plea
 
 #include <Wire.h>
 
-#define TEMP_ADD (0xb8 >> 1) 
+#define TEMP_ADD (0xb8 >> 1) //address of temp sensor 
 
 
 
@@ -38,17 +35,29 @@ void loop()
 
  delay(2000);
   
-  Wire.requestFrom(TEMP_ADD, 8);    // request 6 bytes from slave device 0xB8
+  Wire.requestFrom(TEMP_ADD, 8);    // request 6 bytes from temp sensor (slave device 0xB8)
   Wire.requestFrom(TEMP_ADD, 8);    // Manufacturer recommends making request twice for accurate data
+  
   int i=0; 
   uint8_t high_hum = 0; 
   uint8_t low_hum = 0; 
   uint8_t high_temp = 0;
   uint8_t low_temp = 0; 
+  uint8_t crc_L = 0;
+  uint8_t crc_H = 0; 
+  uint8_t func_code = 0;
+  uint8_t num_byt = 0; 
+  
   while (Wire.available()) { // slave may send less than requested
    char c = Wire.read(); // receive a byte as character
-   if (i==2)
+   if (i==0)
    {
+    func_code = c;
+   }
+   else if(i==1){
+    num_byt = c; 
+   }
+   else if (i==2){
     high_hum = c;  
    } 
    else if (i==3)
@@ -63,6 +72,14 @@ void loop()
    {
     low_temp =c;  
    }
+   else if (i==6)
+   {
+    crc_L = c; 
+   }
+   else if (i==7)
+   {
+    crc_H = c; 
+   }
    else
    {
     //MISRA :)
@@ -72,9 +89,10 @@ void loop()
    {
      i++;
    }
-    //Serial.println(high_hum);         // print the character
+    
   }
 
+  uint16_t crc_temp = (( crc_H << 8)  | crc_L );
   bool negativeTemp = (0x80 & high_temp);
   uint16_t tempConvBase = (((0x7F & high_temp) << 8) | low_temp) / 10;
   uint16_t tempConvDec = (((0x7F & high_temp) << 8) | low_temp) % 10;
@@ -87,10 +105,34 @@ void loop()
     tempSign = '-';
   }
 
-  //Serial.print("TH = ");
-  //Serial.print(high_temp);
-  //Serial.print(" TL = ");
-  //Serial.print(low_temp);
+
+  uint16_t crc_temp_calc = 0xFFFF; 
+  uint8_t temp_mesg[6];
+  temp_mesg[0] = func_code;
+  temp_mesg[1] = num_byt;
+  temp_mesg[2] = high_hum;
+  temp_mesg[3] = low_hum;
+  temp_mesg[4] = high_temp;
+  temp_mesg[5] = low_temp; 
+//  temp_mesg [func_code, num_byt, high_hum, low_hum, high_temp, low_temp];
+  //temp_mesg [0x03, 0x04, 0x02, 0x19, 0x01, 0x04]; //test values 
+  for (int j=0; j<6; j++)
+  {
+    crc_temp_calc = crc_temp_calc^temp_mesg[j];
+  
+  for (int k=0; k<8; k++){
+    if (crc_temp_calc & 0x01)
+    {
+      crc_temp_calc = crc_temp_calc >> 1;
+      crc_temp_calc = crc_temp_calc ^ 0xA001;
+    }else{
+      crc_temp_calc = crc_temp_calc >> 1;
+    }
+  }
+    
+  }
+    
+  if (crc_temp_calc == crc_temp){
   Serial.print("Temp. = ");
   Serial.print(tempSign);
   Serial.print(tempConvBase);
@@ -99,6 +141,5 @@ void loop()
   Serial.print("Rel. Humidity = ");
   Serial.print(hum); 
   Serial.println("%");
-  //delay(200);
-
+  }
 }
